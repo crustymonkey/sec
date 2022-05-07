@@ -1,39 +1,48 @@
 extern crate chrono;
-#[macro_use] extern crate log;
+#[macro_use]
+extern crate log;
 
 mod lib;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use lib::crypto::{gen_iv, encrypt_w_iv, decrypt_w_iv};
+use lib::crypto::{decrypt_w_iv, encrypt_w_iv, gen_iv};
 use rpassword::prompt_password;
 use std::fs::File;
-use std::io::{Read, stdin, stdout, Write};
+use std::io::{stdin, stdout, Read, Write};
 
 #[derive(Subcommand)]
 enum Commands {
     /// Encrypt the given file
     Enc {
-        #[clap(help="Specify the file to read from. If '-', will read from \
+        #[clap(help = "Specify the file to read from. If '-', will read from \
             stdin")]
         infile: String,
-        #[clap(short, long, default_value="-",
-            help="Specify the file to write the output to. \
+        #[clap(
+            short,
+            long,
+            default_value = "-",
+            help = "Specify the file to write the output to. \
             If not specified or is '-', the output will be written to \
-            stdout")]
+            stdout"
+        )]
         outfile: String,
     },
     /// Decrypt the given file
     Dec {
-        #[clap(help="Specify the file to read from. If '-', will read from \
+        #[clap(help = "Specify the file to read from. If '-', will read from \
             stdin")]
         infile: String,
-        #[clap(short, long, default_value="-",
-            help="Specify the file to write the output to. \
+        #[clap(
+            short,
+            long,
+            default_value = "-",
+            help = "Specify the file to write the output to. \
             If not specified or is '-', the output will be written to \
-            stdout")]
+            stdout"
+        )]
         outfile: String,
-    }
+    },
 }
 
 #[derive(Parser)]
@@ -41,7 +50,7 @@ enum Commands {
 struct Args {
     #[clap(subcommand)]
     command: Commands,
-    #[clap(short='D', long)]
+    #[clap(short = 'D', long)]
     debug: bool,
 }
 
@@ -115,7 +124,7 @@ fn read_file(f: &str) -> Result<Vec<u8>> {
         let n = stdin().read_to_end(&mut ret)?;
         debug!("Read {} bytes from stdin", n);
         return Ok(ret);
-    } 
+    }
 
     let mut file = File::open(f)?;
     let n = file.read_to_end(&mut ret)?;
@@ -133,7 +142,7 @@ fn write_file(content: &[u8], f: &str) -> Result<()> {
     let mut file = File::create(f)?;
     file.write_all(content)?;
     file.flush()?;
-    
+
     return Ok(());
 }
 
@@ -141,27 +150,24 @@ fn encrypt(passphrase: String, infile: &str, outfile: &str) {
     let key = passphrase.as_bytes();
     let iv = gen_iv();
 
-    let contents = read_file(infile).expect(
-        &format!("Failed to read from {}", infile));
-    
-    let encrypted = encrypt_w_iv(&contents, key, &iv)
-        .expect("Failed to encrypt the contents");
+    let contents = read_file(infile).expect(&format!("Failed to read from {}", infile));
 
-    write_file(&encrypted, outfile)
-        .expect(&format!("Failed to write to: {}", outfile));
+    let encrypted = encrypt_w_iv(&contents, key, &iv).expect("Failed to encrypt the contents");
+
+    write_file(&encrypted, outfile).expect(&format!("Failed to write to: {}", outfile));
 }
 
 fn decrypt(passphrase: String, infile: &str, outfile: &str) {
     let key = passphrase.as_bytes();
 
-    let contents = read_file(infile)
-        .expect(&format!("Failed to read from {}", infile));
-    let decrypted = decrypt_w_iv(&contents, key)
-        .expect("Failed to decrypt the contents");
-    debug!("Got decrypted output: {}", String::from_utf8(decrypted.clone()).unwrap());
-    
-    write_file(&decrypted, outfile)
-        .expect(&format!("Failed to write to: {}", outfile));
+    let contents = read_file(infile).expect(&format!("Failed to read from {}", infile));
+    let decrypted = decrypt_w_iv(&contents, key).expect("Failed to decrypt the contents");
+    debug!(
+        "Got decrypted output: {}",
+        String::from_utf8(decrypted.clone()).unwrap()
+    );
+
+    write_file(&decrypted, outfile).expect(&format!("Failed to write to: {}", outfile));
 }
 
 fn main() {
@@ -172,10 +178,10 @@ fn main() {
         Commands::Enc { infile, outfile } => {
             let passphrase = get_pass(true);
             encrypt(passphrase, infile, outfile);
-        },
+        }
         Commands::Dec { infile, outfile } => {
             let passphrase = get_pass(false);
             decrypt(passphrase, infile, outfile);
-        },
+        }
     }
 }

@@ -1,10 +1,11 @@
-#[cfg(test)] extern crate base64;
+#[cfg(test)]
+extern crate base64;
 
-use rand_core::{RngCore, OsRng};
-use aes_gcm::{Aes256Gcm, Key, Nonce};
 use aes_gcm::aead::{Aead, NewAead};
-use anyhow::{Result, anyhow};
+use aes_gcm::{Aes256Gcm, Key, Nonce};
+use anyhow::{anyhow, Result};
 use md5;
+use rand_core::{OsRng, RngCore};
 
 const IV_LEN: usize = 12;
 const KEY_LEN: usize = 32;
@@ -32,7 +33,7 @@ fn validate_len(name: &str, item: &[u8], valid_len: usize) -> Result<()> {
 
 pub fn encrypt(text: &[u8], key: &[u8], iv: &[u8]) -> Result<Vec<u8>> {
     let key = hash_key(key);
-    validate_len("iv", iv,IV_LEN)?;
+    validate_len("iv", iv, IV_LEN)?;
 
     let keyl = Key::from_slice(&key);
     let ivl = Nonce::from_slice(iv);
@@ -41,7 +42,7 @@ pub fn encrypt(text: &[u8], key: &[u8], iv: &[u8]) -> Result<Vec<u8>> {
         Ok(val) => val,
         Err(e) => {
             return Err(anyhow!("Failed to decrypt: {}", e));
-        },
+        }
     };
     return Ok(ret);
 }
@@ -57,7 +58,7 @@ pub fn decrypt(enc: &[u8], key: &[u8], iv: &[u8]) -> Result<Vec<u8>> {
         Ok(val) => val,
         Err(e) => {
             return Err(anyhow!("Failed to decrypt: {}", e));
-        },
+        }
     };
     return Ok(ret);
 }
@@ -113,7 +114,10 @@ fn test_encrypt_decrypt() {
 
     let encrypted = encrypt(to_enc, key, iv).unwrap();
 
-    assert_eq!(encode(&encrypted), "FWhZFBluJH7/W30MGZGi7MJY45BaUypT7ahiR5Dv");
+    assert_eq!(
+        encode(&encrypted),
+        "FWhZFBluJH7/W30MGZGi7MJY45BaUypT7ahiR5Dv"
+    );
 
     let decrypted = decrypt(&encrypted, key, iv).unwrap();
 
@@ -129,8 +133,10 @@ fn test_enc_dec_w_iv() {
 
     let res = encrypt_w_iv(to_enc, key, iv).unwrap();
 
-    assert_eq!(encode(&res),
-        "MDEyMzQ1Njc4OWFiFWhZFBluJH7/W30MGZGi7MJY45BaUypT7ahiR5Dv");
+    assert_eq!(
+        encode(&res),
+        "MDEyMzQ1Njc4OWFiFWhZFBluJH7/W30MGZGi7MJY45BaUypT7ahiR5Dv"
+    );
 
     let plain = decrypt_w_iv(&res, key).unwrap();
 
