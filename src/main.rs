@@ -154,8 +154,8 @@ fn encrypt(passphrase: String, infile: &str, outfile: &str) {
 fn decrypt(passphrase: String, infile: &str, outfile: &str) {
     let key = passphrase.as_bytes();
 
-    let contents = read_file(infile).expect(
-        &format!("Failed to read from {}", infile));
+    let contents = read_file(infile)
+        .expect(&format!("Failed to read from {}", infile));
     let decrypted = decrypt_w_iv(&contents, key)
         .expect("Failed to decrypt the contents");
     debug!("Got decrypted output: {}", String::from_utf8(decrypted.clone()).unwrap());
