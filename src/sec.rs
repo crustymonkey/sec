@@ -6,10 +6,19 @@ mod lib;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use lib::crypto::{decrypt_w_iv, encrypt_w_iv, gen_iv};
+use lib::crypto::{
+    self,
+    decrypt_w_iv,
+    encrypt_w_iv,
+    gen_iv,
+    get_iv_from_enc,
+    IV_LEN,
+};
 use rpassword::prompt_password;
-use std::fs::File;
-use std::io::{stdin, stdout, Read, Write};
+use std::fs::{File, metadata};
+use std::io::{stdin, stdout, Read, Write, BufReader, BufRead};
+
+const BUF_SIZE: usize = 4096;
 
 #[derive(Subcommand)]
 enum Commands {
@@ -27,6 +36,8 @@ enum Commands {
             stdout"
         )]
         outfile: String,
+        #[clap(short, long, help="Show a progress bar while encrypting")]
+        progress: bool,
     },
     /// Decrypt the given file
     Dec {
@@ -42,6 +53,8 @@ enum Commands {
             stdout"
         )]
         outfile: String,
+        #[clap(short, long, help="Show a progress bar while decrypting")]
+        progress: bool,
     },
 }
 
@@ -146,28 +159,116 @@ fn write_file(content: &[u8], f: &str) -> Result<()> {
     return Ok(());
 }
 
-fn encrypt(passphrase: String, infile: &str, outfile: &str) {
+fn encrypt(
+    passphrase: String,
+    infile: &str,
+    outfile: &str,
+    progress: &bool,
+) -> Result<()> {
     let key = passphrase.as_bytes();
     let iv = gen_iv();
+    let mut buf = [0_u8; BUF_SIZE];
+    let inf: Box<dyn Read>;
+    let mut outf: Box<dyn Write>;
+    let mut inf_size: u64 = BUF_SIZE as u64 + 1;
 
-    let contents = read_file(infile).expect(&format!("Failed to read from {}", infile));
+    if infile == "-" {
+        inf = Box::new(stdin());
+    } else {
+        inf = Box::new(File::open(infile)?);
+        inf_size = metadata(infile).unwrap().len();
+    }
 
-    let encrypted = encrypt_w_iv(&contents, key, &iv).expect("Failed to encrypt the contents");
+    if outfile == "-" {
+        outf = Box::new(stdout());
+    } else {
+        outf = Box::new(File::create(outfile)?);
+    }
 
-    write_file(&encrypted, outfile).expect(&format!("Failed to write to: {}", outfile));
+    let mut reader = BufReader::new(inf);
+    let mut lcount: u64 = 0;
+
+    loop {
+        let count = reader.read(&mut buf)?;
+        if count == 0 {
+            break;
+        }
+
+        let encrypted: Vec<u8>;
+        if lcount == 0 {
+            encrypted = encrypt_w_iv(&buf[..count], key, &iv)?;
+        } else {
+            encrypted = crypto::encrypt(&buf[..count], key, &iv)?;
+        }
+
+        outf.write(&encrypted)?;
+        lcount += 1;
+    }
+
+    outf.flush()?;
+
+    return Ok(());
 }
 
-fn decrypt(passphrase: String, infile: &str, outfile: &str) {
+fn decrypt(
+    passphrase: String,
+    infile: &str,
+    outfile: &str,
+    progress: &bool,
+) -> Result<()> {
     let key = passphrase.as_bytes();
 
-    let contents = read_file(infile).expect(&format!("Failed to read from {}", infile));
-    let decrypted = decrypt_w_iv(&contents, key).expect("Failed to decrypt the contents");
-    debug!(
-        "Got decrypted output: {}",
-        String::from_utf8(decrypted.clone()).unwrap()
-    );
+    let mut buf = [0_u8; BUF_SIZE];
+    let mut bclone = [0_u8; BUF_SIZE];
+    let inf: Box<dyn Read>;
+    let mut outf: Box<dyn Write>;
+    let mut inf_size: u64 = BUF_SIZE as u64 + 1;
 
-    write_file(&decrypted, outfile).expect(&format!("Failed to write to: {}", outfile));
+    if infile == "-" {
+        inf = Box::new(stdin());
+    } else {
+        inf = Box::new(File::open(infile)?);
+        inf_size = metadata(infile).unwrap().len();
+    }
+
+    if outfile == "-" {
+        outf = Box::new(stdout());
+    } else {
+        outf = Box::new(File::create(outfile)?);
+    }
+
+    let mut reader = BufReader::new(inf);
+    let mut lcount: u64 = 0;
+    let mut iv: &[u8] = &[0_u8; IV_LEN];
+
+    loop {
+        let count = reader.read(&mut buf)?;
+        if count == 0 {
+            break;
+        }
+
+        if lcount == 0 {
+            // We have to extract the IV on the first part of the loop
+            bclone = buf.clone();
+            let res = get_iv_from_enc(&bclone[..count]);
+            // Set the iv value here;
+            iv = res.0;
+
+            let decrypted = crypto::decrypt(res.1, key, iv)?;
+
+            outf.write(&decrypted)?;
+        } else {
+            let decrypted = crypto::decrypt(&buf[..count], key, iv)?;
+
+            outf.write(&decrypted)?;
+        }
+
+        lcount += 1
+    }
+
+    outf.flush().expect("Failed to flush the buffer");
+
+    return Ok(());
 }
 
 fn main() {
@@ -175,13 +276,18 @@ fn main() {
     setup_logging(&args);
 
     match &args.command {
-        Commands::Enc { infile, outfile } => {
-            let passphrase = get_pass(true);
-            encrypt(passphrase, infile, outfile);
+        Commands::Enc { infile, outfile, progress } => {
+            //let passphrase = get_pass(true);
+            let passphrase = "test".to_string();
+            encrypt(passphrase, infile, outfile, progress).unwrap();
         }
-        Commands::Dec { infile, outfile } => {
-            let passphrase = get_pass(false);
-            decrypt(passphrase, infile, outfile);
+        Commands::Dec { infile, outfile, progress } => {
+            //let passphrase = get_pass(false);
+            let passphrase = "test".to_string();
+            match decrypt(passphrase, infile, outfile, progress) {
+                Ok(_) => println!("OK"),
+                Err(e) => println!("Error: {e}"),
+            };
         }
     }
 }

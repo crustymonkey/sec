@@ -7,8 +7,7 @@ use anyhow::{anyhow, Result};
 use md5;
 use rand_core::{OsRng, RngCore};
 
-const IV_LEN: usize = 12;
-const KEY_LEN: usize = 32;
+pub const IV_LEN: usize = 12;
 
 pub fn gen_iv() -> Vec<u8> {
     let mut ret = vec![0; IV_LEN];
@@ -73,72 +72,85 @@ pub fn encrypt_w_iv(text: &[u8], key: &[u8], iv: &[u8]) -> Result<Vec<u8>> {
 
     return Ok(ret);
 }
-/// Return a Vec<u8> with the iv prepended
-pub fn decrypt_w_iv(enc: &[u8], key: &[u8]) -> Result<Vec<u8>> {
-    let iv = &enc[..IV_LEN];
-    let cipher_bytes = &enc[IV_LEN..];
-    let ret = decrypt(&cipher_bytes, key, iv)?;
+
+/// Return the IV from the first block of encrypted data along with remaining
+/// data
+pub fn get_iv_from_enc<'a>(enc: &'a[u8]) -> (&'a[u8], &'a[u8]) {
+    let iv: &'a[u8] = &enc[..IV_LEN];
+
+    return (iv, &enc[IV_LEN..]);
+}
+
+/// Return a Vec<u8>
+pub fn decrypt_w_iv(enc: &[u8], key: &[u8], iv: &[u8]) -> Result<Vec<u8>> {
+    let ret = decrypt(enc.as_ref(), key, iv.as_ref())?;
 
     return Ok(ret);
 }
 
-#[test]
-fn test_hash_key() {
-    let key = b"test";
-    let padded = hash_key(key);
-    assert_eq!(padded.len(), KEY_LEN);
+#[cfg(test)]
+mod tests {
+    use super::*;
+    const KEY_LEN: usize = 32;
 
-    assert_eq!(padded, b"098f6bcd4621d373cade4e832627b4f6".to_vec());
+    #[test]
+    fn test_hash_key() {
+        let key = b"test";
+        let padded = hash_key(key);
+        assert_eq!(padded.len(), KEY_LEN);
+
+        assert_eq!(padded, b"098f6bcd4621d373cade4e832627b4f6".to_vec());
+    }
+
+    #[test]
+    fn test_gen_iv() {
+        let iv = gen_iv();
+
+        assert_eq!(iv.len(), IV_LEN);
+    }
+
+    #[test]
+    fn test_validate_len() {
+        let item = b"test";
+        assert!(validate_len("", item, 4).is_ok());
+        assert!(validate_len("", item, 5).is_err());
+    }
+
+    #[test]
+    fn test_encrypt_decrypt() {
+        use base64::encode;
+        let iv = b"0123456789ab";
+        let key = b"password";
+        let to_enc = b"this is a test";
+
+        let encrypted = encrypt(to_enc, key, iv).unwrap();
+
+        assert_eq!(
+            encode(&encrypted),
+            "FWhZFBluJH7/W30MGZGi7MJY45BaUypT7ahiR5Dv"
+        );
+
+        let decrypted = decrypt(&encrypted, key, iv).unwrap();
+
+        assert_eq!(decrypted, to_enc.to_vec());
+    }
+
+    #[test]
+    fn test_enc_dec_w_iv() {
+        use base64::encode;
+        let iv = b"0123456789ab";
+        let key = b"password";
+        let to_enc = b"this is a test";
+
+        let res = encrypt_w_iv(to_enc, key, iv).unwrap();
+
+        assert_eq!(
+            encode(&res),
+            "MDEyMzQ1Njc4OWFiFWhZFBluJH7/W30MGZGi7MJY45BaUypT7ahiR5Dv"
+        );
+
+        let plain = decrypt_w_iv(&res, key).unwrap();
+
+        assert_eq!(plain, to_enc.to_vec());
 }
-
-#[test]
-fn test_gen_iv() {
-    let iv = gen_iv();
-
-    assert_eq!(iv.len(), IV_LEN);
-}
-
-#[test]
-fn test_validate_len() {
-    let item = b"test";
-    assert!(validate_len("", item, 4).is_ok());
-    assert!(validate_len("", item, 5).is_err());
-}
-
-#[test]
-fn test_encrypt_decrypt() {
-    use base64::encode;
-    let iv = b"0123456789ab";
-    let key = b"password";
-    let to_enc = b"this is a test";
-
-    let encrypted = encrypt(to_enc, key, iv).unwrap();
-
-    assert_eq!(
-        encode(&encrypted),
-        "FWhZFBluJH7/W30MGZGi7MJY45BaUypT7ahiR5Dv"
-    );
-
-    let decrypted = decrypt(&encrypted, key, iv).unwrap();
-
-    assert_eq!(decrypted, to_enc.to_vec());
-}
-
-#[test]
-fn test_enc_dec_w_iv() {
-    use base64::encode;
-    let iv = b"0123456789ab";
-    let key = b"password";
-    let to_enc = b"this is a test";
-
-    let res = encrypt_w_iv(to_enc, key, iv).unwrap();
-
-    assert_eq!(
-        encode(&res),
-        "MDEyMzQ1Njc4OWFiFWhZFBluJH7/W30MGZGi7MJY45BaUypT7ahiR5Dv"
-    );
-
-    let plain = decrypt_w_iv(&res, key).unwrap();
-
-    assert_eq!(plain, to_enc.to_vec());
 }
