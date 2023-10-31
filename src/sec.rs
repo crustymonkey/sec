@@ -20,7 +20,7 @@ use std::io::{stdin, stdout, Read, Write, BufReader};
 const BUF_SIZE: usize = 4096;
 const GCM_SIZE: usize = 16;
 const PROGESS_TPL: &str = "[{elapsed_precise}] {bytes}/{total_bytes} \
-    {wide_bar:50.cyan/blue}";
+    {bar:40.cyan/blue}";
 
 #[derive(Subcommand)]
 enum Commands {
