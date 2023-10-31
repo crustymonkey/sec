@@ -137,10 +137,10 @@ fn get_pass(double_check: bool) -> String {
 fn fill_buf(
     buf: &mut [u8],
     reader: &mut BufReader<Box<dyn Read>>,
+    buf_size: usize,
 ) -> Result<usize> {
-    let to_read = BUF_SIZE + GCM_SIZE;
     let mut overall_count = 0;
-    while overall_count < to_read {
+    while overall_count < buf_size {
         let count = reader.read(&mut buf[overall_count..])?;
         if count == 0 {
             return Ok(overall_count);
@@ -195,7 +195,7 @@ fn encrypt(
     }
 
     loop {
-        let count = fill_buf(&mut buf, &mut reader)?;
+        let count = fill_buf(&mut buf, &mut reader, BUF_SIZE)?;
         if count == 0 {
             break;
         }
@@ -276,7 +276,7 @@ fn decrypt(
     }
 
     loop {
-        let count = fill_buf(&mut buf, &mut reader)?;
+        let count = fill_buf(&mut buf, &mut reader, BUF_SIZE + GCM_SIZE)?;
         //let count = reader.read(&mut buf)?;
         if count == 0 {
             break;
