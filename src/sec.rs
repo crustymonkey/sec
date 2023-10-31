@@ -2,23 +2,25 @@ extern crate chrono;
 #[macro_use]
 extern crate log;
 
-mod lib;
+mod clib;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use lib::crypto::{
+use clib::crypto::{
     self,
-    decrypt_w_iv,
     encrypt_w_iv,
     gen_iv,
-    get_iv_from_enc,
     IV_LEN,
 };
+use indicatif::{ProgressBar, ProgressStyle};
 use rpassword::prompt_password;
 use std::fs::{File, metadata};
-use std::io::{stdin, stdout, Read, Write, BufReader, BufRead};
+use std::io::{stdin, stdout, Read, Write, BufReader};
 
 const BUF_SIZE: usize = 4096;
+const GCM_SIZE: usize = 16;
+const PROGESS_TPL: &str = "[{elapsed_precise}] {bytes}/{total_bytes} \
+    {wide_bar:50.cyan/blue}";
 
 #[derive(Subcommand)]
 enum Commands {
@@ -130,33 +132,23 @@ fn get_pass(double_check: bool) -> String {
     return ret;
 }
 
-fn read_file(f: &str) -> Result<Vec<u8>> {
-    let mut ret: Vec<u8> = vec![];
-    if f == "-" {
-        // Read from stdin
-        let n = stdin().read_to_end(&mut ret)?;
-        debug!("Read {} bytes from stdin", n);
-        return Ok(ret);
+/// This assures that the read buffer is filled to capacity before returning
+/// so that the encryption/decryption alignment is correct
+fn fill_buf(
+    buf: &mut [u8],
+    reader: &mut BufReader<Box<dyn Read>>,
+) -> Result<usize> {
+    let to_read = BUF_SIZE + GCM_SIZE;
+    let mut overall_count = 0;
+    while overall_count < to_read {
+        let count = reader.read(&mut buf[overall_count..])?;
+        if count == 0 {
+            return Ok(overall_count);
+        }
+        overall_count += count;
     }
 
-    let mut file = File::open(f)?;
-    let n = file.read_to_end(&mut ret)?;
-    debug!("Read {} bytes from {}", n, f);
-
-    return Ok(ret);
-}
-
-fn write_file(content: &[u8], f: &str) -> Result<()> {
-    if f == "-" {
-        stdout().write_all(content)?;
-        return Ok(());
-    }
-
-    let mut file = File::create(f)?;
-    file.write_all(content)?;
-    file.flush()?;
-
-    return Ok(());
+    return Ok(overall_count);
 }
 
 fn encrypt(
@@ -170,7 +162,7 @@ fn encrypt(
     let mut buf = [0_u8; BUF_SIZE];
     let inf: Box<dyn Read>;
     let mut outf: Box<dyn Write>;
-    let mut inf_size: u64 = BUF_SIZE as u64 + 1;
+    let mut inf_size: u64 = 0;
 
     if infile == "-" {
         inf = Box::new(stdin());
@@ -187,11 +179,29 @@ fn encrypt(
 
     let mut reader = BufReader::new(inf);
     let mut lcount: u64 = 0;
+    let mut bar: Option<ProgressBar> = None;
+    if *progress {
+        if inf_size == 0 {
+            // Reading from stdin, use a spinner
+            bar = Some(ProgressBar::new_spinner());
+        } else {
+            bar = Some(ProgressBar::new(inf_size));
+            bar.as_mut().unwrap().set_style(
+                ProgressStyle::with_template(PROGESS_TPL)
+                .unwrap()
+                .progress_chars("#-")
+            );
+        }
+    }
 
     loop {
-        let count = reader.read(&mut buf)?;
+        let count = fill_buf(&mut buf, &mut reader)?;
         if count == 0 {
             break;
+        }
+
+        if *progress {
+            bar.as_mut().unwrap().inc(count as u64);
         }
 
         let encrypted: Vec<u8>;
@@ -201,8 +211,13 @@ fn encrypt(
             encrypted = crypto::encrypt(&buf[..count], key, &iv)?;
         }
 
+        debug!("Writing {} bytes", encrypted.len());
         outf.write(&encrypted)?;
         lcount += 1;
+    }
+
+    if *progress {
+        bar.unwrap().finish();
     }
 
     outf.flush()?;
@@ -218,11 +233,12 @@ fn decrypt(
 ) -> Result<()> {
     let key = passphrase.as_bytes();
 
-    let mut buf = [0_u8; BUF_SIZE];
-    let mut bclone = [0_u8; BUF_SIZE];
+    // We have to extract the GCM padding in addition to the actual encrypted
+    // content with each read.
+    let mut buf = [0_u8; BUF_SIZE + GCM_SIZE];
     let inf: Box<dyn Read>;
     let mut outf: Box<dyn Write>;
-    let mut inf_size: u64 = BUF_SIZE as u64 + 1;
+    let mut inf_size: u64 = 0;
 
     if infile == "-" {
         inf = Box::new(stdin());
@@ -238,32 +254,45 @@ fn decrypt(
     }
 
     let mut reader = BufReader::new(inf);
-    let mut lcount: u64 = 0;
-    let mut iv: &[u8] = &[0_u8; IV_LEN];
+    let mut iv = [0_u8; IV_LEN];
+    reader.read_exact(&mut iv)?;
+
+    let mut bar: Option<ProgressBar> = None;
+    if *progress {
+        if inf_size == 0 {
+            // Reading from stdin, use a spinner
+            bar = Some(ProgressBar::new_spinner());
+        } else {
+            bar = Some(ProgressBar::new(inf_size));
+            bar.as_mut().unwrap().set_style(
+                ProgressStyle::with_template(PROGESS_TPL)
+                .unwrap()
+                .progress_chars("#-")
+            );
+        }
+    }
+    if *progress {
+        bar.as_mut().unwrap().inc(IV_LEN as u64);
+    }
 
     loop {
-        let count = reader.read(&mut buf)?;
+        let count = fill_buf(&mut buf, &mut reader)?;
+        //let count = reader.read(&mut buf)?;
         if count == 0 {
             break;
         }
 
-        if lcount == 0 {
-            // We have to extract the IV on the first part of the loop
-            bclone = buf.clone();
-            let res = get_iv_from_enc(&bclone[..count]);
-            // Set the iv value here;
-            iv = res.0;
-
-            let decrypted = crypto::decrypt(res.1, key, iv)?;
-
-            outf.write(&decrypted)?;
-        } else {
-            let decrypted = crypto::decrypt(&buf[..count], key, iv)?;
-
-            outf.write(&decrypted)?;
+        if *progress {
+            bar.as_mut().unwrap().inc(count as u64);
         }
 
-        lcount += 1
+        debug!("Calling decrypt on {count} bytes");
+        let decrypted = crypto::decrypt(&buf[..count], key, &iv)?;
+        outf.write(&decrypted)?;
+    }
+
+    if *progress {
+        bar.unwrap().finish();
     }
 
     outf.flush().expect("Failed to flush the buffer");
@@ -277,13 +306,11 @@ fn main() {
 
     match &args.command {
         Commands::Enc { infile, outfile, progress } => {
-            //let passphrase = get_pass(true);
-            let passphrase = "test".to_string();
+            let passphrase = get_pass(true);
             encrypt(passphrase, infile, outfile, progress).unwrap();
         }
         Commands::Dec { infile, outfile, progress } => {
-            //let passphrase = get_pass(false);
-            let passphrase = "test".to_string();
+            let passphrase = get_pass(false);
             match decrypt(passphrase, infile, outfile, progress) {
                 Ok(_) => println!("OK"),
                 Err(e) => println!("Error: {e}"),

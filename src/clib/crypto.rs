@@ -73,21 +73,6 @@ pub fn encrypt_w_iv(text: &[u8], key: &[u8], iv: &[u8]) -> Result<Vec<u8>> {
     return Ok(ret);
 }
 
-/// Return the IV from the first block of encrypted data along with remaining
-/// data
-pub fn get_iv_from_enc<'a>(enc: &'a[u8]) -> (&'a[u8], &'a[u8]) {
-    let iv: &'a[u8] = &enc[..IV_LEN];
-
-    return (iv, &enc[IV_LEN..]);
-}
-
-/// Return a Vec<u8>
-pub fn decrypt_w_iv(enc: &[u8], key: &[u8], iv: &[u8]) -> Result<Vec<u8>> {
-    let ret = decrypt(enc.as_ref(), key, iv.as_ref())?;
-
-    return Ok(ret);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -134,23 +119,4 @@ mod tests {
 
         assert_eq!(decrypted, to_enc.to_vec());
     }
-
-    #[test]
-    fn test_enc_dec_w_iv() {
-        use base64::encode;
-        let iv = b"0123456789ab";
-        let key = b"password";
-        let to_enc = b"this is a test";
-
-        let res = encrypt_w_iv(to_enc, key, iv).unwrap();
-
-        assert_eq!(
-            encode(&res),
-            "MDEyMzQ1Njc4OWFiFWhZFBluJH7/W30MGZGi7MJY45BaUypT7ahiR5Dv"
-        );
-
-        let plain = decrypt_w_iv(&res, key).unwrap();
-
-        assert_eq!(plain, to_enc.to_vec());
-}
 }
